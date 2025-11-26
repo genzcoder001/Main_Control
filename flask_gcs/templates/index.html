@@ -12,19 +12,28 @@
         
         /* Header & Status */
         .header { display: flex; justify-content: space-between; align-items: center; padding: 15px 25px; border-bottom: 2px solid #eee; }
+        .header-left { display: flex; align-items: center; gap: 20px; } /* Groups Title + Network Status */
+        
+        /* Network Status Dots */
+        .network-status { display: flex; gap: 15px; font-size: 12px; color: #555; font-weight: bold; }
+        .status-item { display: flex; align-items: center; gap: 5px; }
+        .status-dot { width: 10px; height: 10px; border-radius: 50%; background-color: #ccc; } /* Default Grey */
+        .status-dot.online { background-color: #28a745; box-shadow: 0 0 5px #28a745; } /* Green + Glow */
+        .status-dot.offline { background-color: #dc3545; } /* Red */
+
         .status-badge { padding: 8px 16px; border-radius: 4px; font-weight: bold; color: white; text-transform: uppercase; }
-        .status-manual { background-color: #28a745; } /* Green */
-        .status-auto { background-color: #dc3545; }   /* Red */
-        .status-unknown { background-color: #6c757d; } /* Gray */
+        .status-manual { background-color: #28a745; } 
+        .status-auto { background-color: #dc3545; }   
+        .status-unknown { background-color: #6c757d; } 
 
         /* Tabs */
         .tabs { display: flex; background: #f9f9f9; }
         .tab-button { padding: 15px; cursor: pointer; border: none; font-size: 16px; font-weight: 600; color: #555; flex-grow: 1; background: transparent; }
         .tab-button.active { background: #fff; color: #007bff; border-top: 3px solid #007bff; }
-        .tab-content { display: none; padding: 20px; height: 600px; } /* Fixed height for layout */
+        .tab-content { display: none; padding: 20px; height: 600px; }
         .tab-content.active { display: block; }
 
-        /* Recon Layout (Split Screen) */
+        /* Recon Layout */
         .recon-split { display: flex; height: 100%; gap: 20px; }
         .camera-panel { flex: 2; background: #000; display: flex; align-items: center; justify-content: center; border-radius: 8px; overflow: hidden; }
         .camera-feed { width: 100%; height: 100%; object-fit: contain; }
@@ -34,12 +43,10 @@
         select, button { width: 100%; padding: 12px; font-size: 16px; border-radius: 6px; border: 1px solid #ccc; }
         button { cursor: pointer; color: white; font-weight: 600; border: none; }
         .btn-log { background-color: #007bff; }
-        .btn-nav { background-color: #6610f2; margin-top: auto; } /* Purple */
+        .btn-nav { background-color: #6610f2; margin-top: auto; } 
         .btn-color { padding: 15px; border: 3px solid transparent; opacity: 0.7; }
         .btn-color.selected { border-color: #333; opacity: 1; transform: scale(1.05); }
         .btn-red { background-color: #ff4444; } .btn-green { background-color: #44aa44; } .btn-blue { background-color: #4444ff; }
-        
-        /* Mission Controls */
         .btn-mission { padding: 20px; font-size: 20px; margin-bottom: 10px; }
         .btn-proceed { background-color: #28a745; }
         .btn-stop { background-color: #dc3545; }
@@ -49,7 +56,17 @@
 <body>
     <div class="container">
         <div class="header">
-            <h2>RADO Mission Control</h2>
+            <div class="header-left">
+                <h2>RADO Mission Control</h2>
+                <div class="network-status">
+                    <div class="status-item">
+                        <div id="dot-jetson" class="status-dot"></div> JETSON
+                    </div>
+                    <div class="status-item">
+                        <div id="dot-raspi" class="status-dot"></div> RASPI
+                    </div>
+                </div>
+            </div>
             <div id="state-badge" class="status-badge status-unknown">Connecting...</div>
         </div>
 
@@ -105,22 +122,16 @@
         const AUTH_TOKEN = "RADO_2026_SECURE_ACCESS";
         let selectedColor = null;
         
-        // UI Switching
         function openTab(evt, tabName) {
             document.querySelectorAll('.tab-content').forEach(c => c.style.display = 'none');
             document.querySelectorAll('.tab-button').forEach(b => b.classList.remove('active'));
             document.getElementById(tabName).style.display = 'block';
-            
-            // If clicking a tab button (evt exists), highlight it. If calling programmatically, find it.
             if (evt) evt.currentTarget.className += " active";
             else Array.from(document.querySelectorAll('.tab-button')).find(b => b.textContent.includes(tabName.substring(0,4))).classList.add('active');
-
             if(tabName === 'Mission' && map) setTimeout(() => map.invalidateSize(), 100);
         }
 
-        function switchToAuto() {
-            openTab(null, 'Mission');
-        }
+        function switchToAuto() { openTab(null, 'Mission'); }
 
         function selectColor(color) {
             selectedColor = color;
@@ -128,33 +139,37 @@
             document.getElementById('btn-' + color.toLowerCase()).classList.add('selected');
         }
 
-        // Polling Function
         async function updateStatus() {
             try {
                 const response = await fetch('/status_update');
                 const data = await response.json();
                 
-                // Update GPS
                 document.getElementById('lat-display').textContent = data.lat.toFixed(6);
                 document.getElementById('lon-display').textContent = data.lon.toFixed(6);
                 if(map) updateMap(data.lat, data.lon);
 
-                // Update State Badge
                 const badge = document.getElementById('state-badge');
                 badge.textContent = `STATUS: ${data.state}`;
-                badge.className = 'status-badge'; // Reset
+                badge.className = 'status-badge'; 
                 if(data.state === 'MANUAL') badge.classList.add('status-manual');
                 else if(data.state.includes('AUTONOMOUS')) badge.classList.add('status-auto');
                 else badge.classList.add('status-unknown');
 
+                // --- UPDATE NETWORK DOTS ---
+                updateDot('dot-jetson', data.network.JETSON);
+                updateDot('dot-raspi', data.network.RASPI);
+
             } catch (error) { console.error(error); }
         }
 
-        // API Logic
+        function updateDot(elementId, isOnline) {
+            const dot = document.getElementById(elementId);
+            dot.className = 'status-dot ' + (isOnline ? 'online' : 'offline');
+        }
+
         async function logCurrentStep() {
             const obj = document.getElementById('object-select').value;
             const lbl = document.getElementById('log-status');
-            
             if(!selectedColor) { lbl.textContent = "Select a color!"; return; }
             
             lbl.textContent = "Logging...";
@@ -178,40 +193,32 @@
             });
         }
 
-        // Map Setup (Leaflet)
         let map, roverMarker, pathPolyline;
         function initMap() {
             map = L.map('map').setView([15.3911, 73.8782], 18);
-            L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+            L.tileLayer('http://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
                 maxZoom: 19,
-                attribution: 'Tiles &copy; Esri &mdash; Source: Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP, and the GIS User Community'
+                attribution: 'Tiles &copy; Esri'
             }).addTo(map);
             pathPolyline = L.polyline([], {color: 'red', weight: 4}).addTo(map);
         }
         function updateMap(lat, lon) {
-            if (!map) return; // Don't do anything if map isn't ready
+            if (!map) return;
+            if (lat === 0.0 && lon === 0.0) return; 
 
             const newLatLng = [lat, lon];
-
-            // Update Rover Marker
             if (!roverMarker) {
-                // Create marker if it doesn't exist
-                roverMarker = L.marker(newLatLng).addTo(map)
-                    .bindPopup("Rover Position").openPopup();
-                map.setView(newLatLng); // Center map on first GPS fix
+                roverMarker = L.marker(newLatLng).addTo(map).bindPopup("Rover Position").openPopup();
+                map.setView(newLatLng); 
             } else {
                 roverMarker.setLatLng(newLatLng);
             }
-
-            // --- THIS IS THE FIX ---
-            // Add the new coordinate to the red line
             pathPolyline.addLatLng(newLatLng);
         }
         function addLogMarker(lat, lon, label) {
             L.marker([lat, lon]).addTo(map).bindPopup(label).openPopup();
         }
 
-        // Init
         initMap();
         setInterval(updateStatus, 1000);
     </script>

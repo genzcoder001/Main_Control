@@ -6,78 +6,50 @@ from sensor_msgs.msg import NavSatFix, Image
 from cv_bridge import CvBridge
 import cv2
 import numpy as np
-from ament_index_python.packages import get_package_share_directory
 import os
 import threading
 import time
+import subprocess # Needed to run ping command
 from flask import Flask, render_template, jsonify, request, Response
 
 SECRET_TOKEN = "RADO_2026_SECURE_ACCESS"
 
+# --- NETWORK CONFIGURATION ---
+IPS_TO_PING = {
+    'JETSON': '192.168.1.16',
+    'RASPI': '192.168.1.17' # Placeholder, change if needed
+}
+network_status = {key: False for key in IPS_TO_PING}
+
 class GcsNode(Node):
     def __init__(self):
         super().__init__('gcs_web_node')
-        self.current_lat = 15.3911  # BITS Goa default
-        self.current_lon = 73.8782
+        self.current_lat = 0.0
+        self.current_lon = 0.0
         self.current_state = "UNKNOWN"
         self.bridge = CvBridge()
         self.latest_frame = None
         
-        # File Setup
         flask_dir = os.path.dirname(os.path.realpath(__file__))
         self.mission_file_path = os.path.join(flask_dir, 'mission_plan.txt')
+        self.get_logger().info(f'Writing logs to: {self.mission_file_path}')
 
-        # --- PUBLISHERS ---
         self.command_publisher_ = self.create_publisher(String, '/gcs/command', 10)
         
-        # --- SUBSCRIBERS ---
-        # 1. State Subscriber (To show status in GUI)
         self.create_subscription(String, '/rover_state', self.state_callback, 10)
-
-        # 2. If you have a camera feeding through ROS (ZED), uncomment below:
-        # self.create_subscription(Image, '/zed/zed_node/rgb/image_rect_color', self.image_callback, 10)
-
-        # 3. We DO NOT simulate GPS here anymore (commented out)
-        # self.fake_lat = 15.3911 
-        # self.fake_lon = 73.8782 
-        # self.gps_sim_timer = self.create_timer(1.0, self.simulate_gps_callback)
+        self.create_subscription(NavSatFix, '/mavros/global_position/global', self.gps_callback, 10)
+        self.create_subscription(Image, '/zed/zed_node/rgb/image_rect_color', self.image_callback, 10)
         
-        # 4. Camera Simulation (Fake Video) [commented out the timer to stop sim]
-        # self.video_timer = self.create_timer(0.033, self.simulate_video_callback)
-        self.sim_circle_x = 0
+        self.get_logger().info('GcsNode running in REAL HARDWARE MODE.')
 
-    def state_callback(self, msg):
-        self.current_state = msg.data
-
-    # Simulation helpers — kept for debugging but NOT active by default
-    def simulate_gps_callback(self):
-        self.fake_lat += 0.00005
-        self.fake_lon += 0.00005
-        self.current_lat = self.fake_lat
-        self.current_lon = self.fake_lon
-    # only for simulation
-    def gps_callback(self, msg):
-        self.current_lat = msg.latitude
-        self.current_lon = msg.longitude
-
-    def simulate_video_callback(self):
-        """Generates a fake video feed (bouncing red ball)."""
-        img = np.zeros((480, 640, 3), np.uint8)
-        self.sim_circle_x = (self.sim_circle_x + 5) % 640
-        cv2.circle(img, (self.sim_circle_x, 240), 50, (0, 0, 255), -1)
-        cv2.putText(img, "NO CAMERA - SIMULATION", (150, 50), 
-                    cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
-        ret, buffer = cv2.imencode('.jpg', img)
-        self.latest_frame = buffer.tobytes()
-
+    def state_callback(self, msg): self.current_state = msg.data
+    def gps_callback(self, msg): self.current_lat = msg.latitude; self.current_lon = msg.longitude
     def image_callback(self, msg):
-        """Handles real camera frames from ROS (ZED)."""
         try:
             cv_image = self.bridge.imgmsg_to_cv2(msg, desired_encoding='bgr8')
             ret, buffer = cv2.imencode('.jpg', cv_image)
             self.latest_frame = buffer.tobytes()
-        except Exception as e:
-            self.get_logger().error(f"CV Bridge Error: {e}")
+        except Exception as e: self.get_logger().error(f"CV Bridge Error: {e}")
 
     def publish_command(self, cmd):
         msg = String(data=cmd)
@@ -85,16 +57,27 @@ class GcsNode(Node):
         self.get_logger().info(f'GUI published command: {cmd}')
 
     def log_mission_step(self, object_type, color_type):
-        # Check for no-GPS case -> small tolerance
-        if abs(self.current_lat) < 1e-9 and abs(self.current_lon) < 1e-9:
-            return "FAILED (No GPS)"
+        if self.current_lat == 0.0: return "FAILED (No GPS Fix)"
         line = f"{object_type},{color_type},{self.current_lat:.7f},{self.current_lon:.7f}\n"
         try:
             with open(self.mission_file_path, 'a') as f: f.write(line)
             return f"Logged {object_type}, {color_type}"
-        except Exception as e:
-            self.get_logger().error(f"Mission file write error: {e}")
-            return "FAILED (Permissions)"
+        except Exception as e: return "FAILED (File Error)"
+
+# --- WATCHDOG THREAD ---
+def network_watchdog():
+    """Continuously pings devices in the background."""
+    while True:
+        for name, ip in IPS_TO_PING.items():
+            try:
+                # Run ping command: count=1, wait=1sec
+                response = subprocess.call(['ping', '-c', '1', '-W', '1', ip], 
+                                           stdout=subprocess.DEVNULL, 
+                                           stderr=subprocess.DEVNULL)
+                network_status[name] = (response == 0)
+            except Exception:
+                network_status[name] = False
+        time.sleep(1.0) # Check every 1 second
 
 # --- Flask App ---
 app = Flask(__name__)
@@ -106,26 +89,27 @@ def index(): return render_template('index.html')
 
 @app.route('/status_update', methods=['GET'])
 def status_update():
-    """Returns GPS and State in one call."""
     return jsonify({
         'lat': ros_node.current_lat,
         'lon': ros_node.current_lon,
-        'state': ros_node.current_state
+        'state': ros_node.current_state,
+        'network': network_status # <-- SENDING NETWORK STATUS TO GUI
     })
 
 def generate_video():
-    """Generator function for the video stream."""
     while True:
         frame = ros_node.latest_frame
         if frame is not None:
-            yield (b'--frame\r\n'
-                   b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
-        time.sleep(0.03) # Approx 30 FPS cap
+            yield (b'--frame\r\n' b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
+        else:
+            img = np.zeros((480, 640, 3), np.uint8)
+            cv2.putText(img, "NO CAMERA SIGNAL", (150, 240), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
+            ret, buffer = cv2.imencode('.jpg', img)
+            yield (b'--frame\r\n' b'Content-Type: image/jpeg\r\n\r\n' + buffer.tobytes() + b'\r\n')
+        time.sleep(0.03)
 
 @app.route('/video_feed')
-def video_feed():
-    """Route for the video stream <img> tag."""
-    return Response(generate_video(), mimetype='multipart/x-mixed-replace; boundary=frame')
+def video_feed(): return Response(generate_video(), mimetype='multipart/x-mixed-replace; boundary=frame')
 
 @app.route('/log_data', methods=['POST'])
 def log_data():
@@ -140,20 +124,14 @@ def mission_command():
     return jsonify({'message': 'Sent'})
 
 def ros_spin():
-    try:
-        # subscribe to mavros global position so GUI node updates lat/lon if needed
-        # If MAVROS node is running in the same ROS graph, uncomment the subscription below:
-        # ros_node.create_subscription(NavSatFix, '/mavros/global_position/global', lambda msg: ros_node.gps_callback(msg), 10)
-        rclpy.spin(ros_node)
-    except Exception:
-        pass
-    finally:
-        try:
-            ros_node.destroy_node()
-        except Exception:
-            pass
+    try: rclpy.spin(ros_node)
+    except: pass
+    finally: ros_node.destroy_node()
 
 if __name__ == '__main__':
+    # Start ROS Thread
     threading.Thread(target=ros_spin, daemon=True).start()
-    # Threaded so Flask can handle multiple concurrent requests while ROS spins
+    # Start Watchdog Thread
+    threading.Thread(target=network_watchdog, daemon=True).start()
+    
     app.run(host='0.0.0.0', port=5000, threaded=True)

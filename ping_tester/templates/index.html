@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Network Connectivity Test</title>
+    <style>
+        body { font-family: sans-serif; background-color: #f4f7f6; display: flex; justify-content: center; padding-top: 50px; }
+        .card { background: white; padding: 30px; border-radius: 10px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); width: 300px; }
+        h2 { text-align: center; color: #333; margin-bottom: 30px; }
+        
+        .device-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; padding: 10px; border-bottom: 1px solid #eee; }
+        .device-name { font-weight: bold; font-size: 18px; color: #555; }
+        
+        .status-indicator { display: flex; align-items: center; gap: 10px; }
+        .status-text { font-size: 14px; color: #777; }
+        
+        /* The Dot Logic */
+        .dot { width: 15px; height: 15px; border-radius: 50%; background-color: #ccc; transition: background-color 0.3s ease; }
+        .dot.online { background-color: #28a745; box-shadow: 0 0 8px #28a745; } /* Green */
+        .dot.offline { background-color: #dc3545; } /* Red */
+    </style>
+</head>
+<body>
+
+    <div class="card">
+        <h2>Device Status</h2>
+        
+        <div class="device-row">
+            <span class="device-name">JETSON</span>
+            <div class="status-indicator">
+                <span id="text-jetson" class="status-text">Checking...</span>
+                <div id="dot-jetson" class="dot"></div>
+            </div>
+        </div>
+
+        <div class="device-row">
+            <span class="device-name">RASPI</span>
+            <div class="status-indicator">
+                <span id="text-raspi" class="status-text">Checking...</span>
+                <div id="dot-raspi" class="dot"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        async function checkNetwork() {
+            try {
+                const response = await fetch('/status');
+                const data = await response.json();
+
+                updateDevice('JETSON', data.JETSON);
+                updateDevice('RASPI', data.RASPI);
+
+            } catch (error) {
+                console.error("Connection to Flask Server Lost");
+            }
+        }
+
+        function updateDevice(name, isOnline) {
+            const dot = document.getElementById(`dot-${name.toLowerCase()}`);
+            const text = document.getElementById(`text-${name.toLowerCase()}`);
+
+            if (isOnline) {
+                dot.className = 'dot online';
+                text.textContent = "ONLINE";
+                text.style.color = "#28a745";
+            } else {
+                dot.className = 'dot offline';
+                text.textContent = "OFFLINE";
+                text.style.color = "#dc3545";
+            }
+        }
+
+        // Poll every 1 second
+        setInterval(checkNetwork, 1000);
+    </script>
+</body>
+</html>
