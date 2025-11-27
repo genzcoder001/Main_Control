@@ -201,16 +201,11 @@ ros2 topic echo /mavros/global_position/global
 ros2 run mavros mavsys status
 ```
 
-### Issue: Emergency stop not working
+### Issue: Emergency stop not working  
 **Solution:**
 - Verify the emergency stop topic is being published
 - Check state_manager_node logs for errors
 
 
-### Tested Configurations
-- ✅ Jetson Xavier NX + Ubuntu 22.04 + ROS 2 Humble
-- ✅ Raspberry Pi 4 (8GB) + Ubuntu 22.04 + ROS 2 Humble
-- ✅ Desktop PC + Ubuntu 22.04 + ROS 2 Humble
 
----
 
