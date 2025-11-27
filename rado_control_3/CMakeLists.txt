@@ -5,21 +5,21 @@ if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   add_compile_options(-Wall -Wextra -Wpedantic)
 endif()
 
-# Find only the ament_cmake dependency, which is required for the build type.
+# Find dependencies
 find_package(ament_cmake REQUIRED)
 
-# Install the Python executable scripts. This is the correct way to handle them.
+# Install Python Executables
 install(
   PROGRAMS
   scripts/state_manager_node.py
   scripts/coordinate_follower_node.py
-
+  scripts/system_monitor_node.py
   DESTINATION lib/${PROJECT_NAME}
 )
 
-# Install the launch and config directories. This remains the same.
+# Install Directories (Launch files, Configs, and the Website)
 install(
-  DIRECTORY launch config
+  DIRECTORY launch config web_gui
   DESTINATION share/${PROJECT_NAME}
 )
 
